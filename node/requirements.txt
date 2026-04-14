@@ -1,0 +1,23 @@
+# =============================================
+# AEROLÍNEAS RAFAEL PABON — Dependencias del nodo
+# =============================================
+
+# API REST
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Bases de datos
+pymssql==2.3.1        # SQL Server (nodo1 y nodo2)
+pymongo==4.10.1       # MongoDB   (nodo3)
+
+# Validación de modelos
+pydantic==2.10.3
+
+# Cliente HTTP asíncrono para propagar eventos a los peers
+httpx==0.28.1
+
+# Variables de entorno (por si se usa fuera de Docker)
+python-dotenv==1.0.1
+
+# Generación de PDF (tarjeta de embarque)
+reportlab==4.2.5

@@ -1,0 +1,249 @@
+# =============================================
+# AEROLÍNEAS RAFAEL PABON — Orquestación Docker
+# Nodo1: FastAPI + SQL Server
+# Nodo2: FastAPI + SQL Server
+# Nodo3: FastAPI + MongoDB
+# Frontend: Streamlit
+# =============================================
+
+services:
+
+  # ─────────────────────────────────────────
+  # BASES DE DATOS
+  # ─────────────────────────────────────────
+
+  sqlserver1:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: arlp_sqlserver1
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: ${SQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver1_data:/var/opt/mssql
+    networks:
+      - airline_network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${SQL_SA_PASSWORD}\" -Q \"SELECT 1\" -No || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  # Contenedor temporal: espera a que sqlserver1 esté sano y ejecuta los scripts SQL
+  sqlserver1_init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: arlp_sqlserver1_init
+    depends_on:
+      sqlserver1:
+        condition: service_healthy
+    environment:
+      SA_PASSWORD: ${SQL_SA_PASSWORD}
+    volumes:
+      - ./database/sqlserver:/init:ro
+    command: >
+      bash -c "
+        echo '--- Inicializando BD nodo1 (SQL Server) ---' &&
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver1 -U sa -P \"$$SA_PASSWORD\" -No -i /init/01_schema.sql &&
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver1 -U sa -P \"$$SA_PASSWORD\" -No -i /init/02_airports.sql &&
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver1 -U sa -P \"$$SA_PASSWORD\" -No -i /init/03_flights.sql &&
+        echo '--- Nodo1: inicialización completada ---'
+      "
+    networks:
+      - airline_network
+
+  sqlserver2:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: arlp_sqlserver2
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: ${SQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      - "1434:1433"          # Puerto externo 1434 para no colisionar con nodo1
+    volumes:
+      - sqlserver2_data:/var/opt/mssql
+    networks:
+      - airline_network
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${SQL_SA_PASSWORD}\" -Q \"SELECT 1\" -No || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  # Contenedor temporal: igual que sqlserver1_init pero apunta a sqlserver2
+  sqlserver2_init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: arlp_sqlserver2_init
+    depends_on:
+      sqlserver2:
+        condition: service_healthy
+    environment:
+      SA_PASSWORD: ${SQL_SA_PASSWORD}
+    volumes:
+      - ./database/sqlserver:/init:ro
+    command: >
+      bash -c "
+        echo '--- Inicializando BD nodo2 (SQL Server) ---' &&
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver2 -U sa -P \"$$SA_PASSWORD\" -No -i /init/01_schema.sql &&
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver2 -U sa -P \"$$SA_PASSWORD\" -No -i /init/02_airports.sql &&
+        /opt/mssql-tools18/bin/sqlcmd -S sqlserver2 -U sa -P \"$$SA_PASSWORD\" -No -i /init/03_flights.sql &&
+        echo '--- Nodo2: inicialización completada ---'
+      "
+    networks:
+      - airline_network
+
+  mongodb3:
+    image: mongo:7
+    container_name: arlp_mongodb3
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb3_data:/data/db
+      # MongoDB ejecuta automáticamente los .js de este directorio al primer arranque
+      - ./database/mongodb:/docker-entrypoint-initdb.d:ro
+    networks:
+      - airline_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok", "--username", "${MONGO_ROOT_USER}", "--password", "${MONGO_ROOT_PASSWORD}", "--authenticationDatabase", "admin"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # ─────────────────────────────────────────
+  # NODOS DE APLICACIÓN (FastAPI)
+  # Mismo Dockerfile, distintas variables de entorno
+  # ─────────────────────────────────────────
+
+  nodo1:
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    container_name: arlp_nodo1
+    environment:
+      NODE_ID: "1"
+      DB_ENGINE: sqlserver
+      DB_HOST: sqlserver1
+      DB_PORT: "1433"
+      DB_NAME: ${SQL_DB_NAME}
+      DB_USER: sa
+      DB_PASSWORD: ${SQL_SA_PASSWORD}
+      # Lista de peers separados por coma (los otros 2 nodos)
+      PEERS: "http://nodo2:8000,http://nodo3:8000"
+      APP_PORT: "8000"
+      # Tiempo en segundos antes de liberar un asiento en Devolución (default: 900 = 15 min)
+      REFUND_TIMEOUT_SECONDS: ${REFUND_TIMEOUT_SECONDS:-900}
+    ports:
+      - "8001:8000"
+    depends_on:
+      sqlserver1:
+        condition: service_healthy
+      sqlserver1_init:
+        condition: service_completed_successfully
+    networks:
+      - airline_network
+    restart: on-failure
+
+  nodo2:
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    container_name: arlp_nodo2
+    environment:
+      NODE_ID: "2"
+      DB_ENGINE: sqlserver
+      DB_HOST: sqlserver2
+      DB_PORT: "1433"
+      DB_NAME: ${SQL_DB_NAME}
+      DB_USER: sa
+      DB_PASSWORD: ${SQL_SA_PASSWORD}
+      PEERS: "http://nodo1:8000,http://nodo3:8000"
+      APP_PORT: "8000"
+      REFUND_TIMEOUT_SECONDS: ${REFUND_TIMEOUT_SECONDS:-900}
+    ports:
+      - "8002:8000"
+    depends_on:
+      sqlserver2:
+        condition: service_healthy
+      sqlserver2_init:
+        condition: service_completed_successfully
+    networks:
+      - airline_network
+    restart: on-failure
+
+  nodo3:
+    build:
+      context: ./node
+      dockerfile: Dockerfile
+    container_name: arlp_nodo3
+    environment:
+      NODE_ID: "3"
+      DB_ENGINE: mongodb
+      DB_HOST: mongodb3
+      DB_PORT: "27017"
+      DB_NAME: ${MONGO_DB_NAME}
+      DB_USER: ${MONGO_ROOT_USER}
+      DB_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      PEERS: "http://nodo1:8000,http://nodo2:8000"
+      APP_PORT: "8000"
+      REFUND_TIMEOUT_SECONDS: ${REFUND_TIMEOUT_SECONDS:-900}
+    ports:
+      - "8003:8000"
+    depends_on:
+      mongodb3:
+        condition: service_healthy
+    networks:
+      - airline_network
+    restart: on-failure
+
+  # ─────────────────────────────────────────
+  # FRONTEND (Streamlit)
+  # ─────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: arlp_frontend
+    environment:
+      NODO1_URL: "http://nodo1:8000"
+      NODO2_URL: "http://nodo2:8000"
+      NODO3_URL: "http://nodo3:8000"
+    ports:
+      - "8501:8501"
+    depends_on:
+      - nodo1
+      - nodo2
+      - nodo3
+    networks:
+      - airline_network
+    restart: on-failure
+
+# ─────────────────────────────────────────
+# VOLÚMENES PERSISTENTES
+# ─────────────────────────────────────────
+
+volumes:
+  sqlserver1_data:
+    driver: local
+  sqlserver2_data:
+    driver: local
+  mongodb3_data:
+    driver: local
+
+# ─────────────────────────────────────────
+# RED INTERNA
+# ─────────────────────────────────────────
+
+networks:
+  airline_network:
+    driver: bridge
+    name: arlp_network
