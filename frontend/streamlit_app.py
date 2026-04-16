@@ -1,196 +1,414 @@
-# =============================================
-# AEROLÍNEAS RAFAEL PABON
-# streamlit_app.py — Página principal
-# Selector de nodo (región), idioma y estado del sistema
-# =============================================
-
-import os
+"""
+Aerolíneas Rafael Pabón - Página Principal
+Estilo Qatar Airways - BUSCADOR DENTRO DEL CARD CON WIDGETS
+"""
 import streamlit as st
-import httpx
+from datetime import datetime, timedelta
+import requests
+import os
 
-from utils.i18n import t, set_lang, get_lang
-
+# ------------------- CONFIGURACIÓN DE PÁGINA -------------------
 st.set_page_config(
-    page_title = "Aerolíneas Rafael Pabón",
-    page_icon  = "✈",
-    layout     = "wide",
+    page_title="Aerolíneas Rafael Pabón",
+    page_icon="✈️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# ─────────────────────────────────────────
-# SELECTOR DE IDIOMA (barra lateral)
-# ─────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ Configuración")
-    idioma = st.selectbox(
-        t("lang_selector"),
-        options=["Español", "English"],
-        index=0 if get_lang() == "es" else 1,
-        key="lang_select_widget",
-    )
-    set_lang("es" if idioma == "Español" else "en")
+# ------------------- CSS PERSONALIZADO -------------------
+st.markdown("""
+<style>
+    /* Ocultar elementos por defecto de Streamlit */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    .stDeployButton {display: none;}
+    
+    /* Fuente */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Header superior */
+    .top-header {
+        background-color: #6B0F1E;
+        padding: 0.8rem 2rem;
+        color: white;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+    }
+    
+    .logo {
+        font-size: 1.5rem;
+        font-weight: bold;
+        letter-spacing: 2px;
+    }
+    
+    .logo small {
+        font-size: 0.7rem;
+        font-weight: normal;
+    }
+    
+    .nav-links {
+        display: flex;
+        gap: 2rem;
+    }
+    
+    .nav-links a {
+        color: white;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.9rem;
+    }
+    
+    .user-area {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        font-size: 0.9rem;
+    }
+    
+    .login-btn {
+        background: transparent;
+        border: 1px solid white;
+        padding: 0.3rem 1rem;
+        border-radius: 20px;
+    }
+    
+    /* Hero banner */
+    .hero-banner {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        padding: 120px 0 80px 0;
+        margin-top: 60px;
+    }
+    
+    /* Tarjeta de búsqueda */
+    .search-card {
+        background: white;
+        border-radius: 24px;
+        padding: 2rem;
+        margin: -60px 2rem 0 2rem;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+        position: relative;
+        z-index: 10;
+    }
+    
+    .field-label {
+        font-size: 0.7rem;
+        font-weight: 700;
+        color: #6B0F1E;
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.5px;
+    }
+    
+    /* Estilos para inputs de Streamlit dentro del card */
+    .search-card .stTextInput input, 
+    .search-card .stDateInput input,
+    .search-card .stSelectbox select {
+        border-radius: 8px !important;
+        border: 1px solid #ddd !important;
+        padding: 0.6rem !important;
+    }
+    
+    /* Sección de destinos */
+    .section-title {
+        font-size: 1.8rem;
+        font-weight: bold;
+        margin: 3rem 2rem 0.5rem 2rem;
+    }
+    
+    .section-subtitle {
+        font-size: 1rem;
+        color: #666;
+        margin: 0 2rem 1.5rem 2rem;
+    }
+    
+    .destinos-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+        padding: 0 2rem;
+    }
+    
+    .destino-card {
+        background: white;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        transition: transform 0.2s;
+        cursor: pointer;
+    }
+    
+    .destino-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+    }
+    
+    .destino-img {
+        height: 180px;
+        background-size: cover;
+        background-position: center;
+    }
+    
+    .destino-info {
+        padding: 1rem;
+    }
+    
+    .destino-ciudad {
+        font-weight: bold;
+        font-size: 1.1rem;
+    }
+    
+    .destino-fechas {
+        font-size: 0.8rem;
+        color: #666;
+        margin: 0.5rem 0;
+    }
+    
+    .destino-precio {
+        color: #6B0F1E;
+        font-weight: bold;
+        font-size: 1.2rem;
+    }
+    
+    /* Footer */
+    .footer {
+        background-color: #1a1a1a;
+        color: white;
+        padding: 2rem;
+        margin-top: 3rem;
+        text-align: center;
+    }
+    
+    .footer-links {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    
+    .footer-links a {
+        color: white;
+        text-decoration: none;
+        font-size: 0.8rem;
+    }
+    
+    /* Botón personalizado */
+    .stButton button {
+        background-color: #6B0F1E !important;
+        color: white !important;
+        border-radius: 40px !important;
+        padding: 0.6rem 1.5rem !important;
+        font-weight: 600 !important;
+        width: 100% !important;
+    }
+    
+    @media (max-width: 768px) {
+        .destinos-grid {
+            grid-template-columns: 1fr;
+        }
+        .nav-links {
+            display: none;
+        }
+        .search-card {
+            margin: -20px 1rem 0 1rem;
+            padding: 1rem;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    st.divider()
-    st.caption("Aerolíneas Rafael Pabón v1.0")
-
-# ─────────────────────────────────────────
-# URLs de los nodos (desde variables de entorno)
-# ─────────────────────────────────────────
-NODOS = {
-    t("nodo1_label"): {
-        "url":    os.environ.get("NODO1_URL", "http://localhost:8001"),
-        "id":     1,
-        "region": "Europa / Frankfurt",
-        "engine": "SQL Server",
-        "icon":   "🌍",
-        "color":  "#1A3A5C",
-    },
-    t("nodo2_label"): {
-        "url":    os.environ.get("NODO2_URL", "http://localhost:8002"),
-        "id":     2,
-        "region": "Asia / Tokio",
-        "engine": "SQL Server",
-        "icon":   "🌏",
-        "color":  "#1A5C3A",
-    },
-    t("nodo3_label"): {
-        "url":    os.environ.get("NODO3_URL", "http://localhost:8003"),
-        "id":     3,
-        "region": "Sudamérica / La Paz",
-        "engine": "MongoDB",
-        "icon":   "🌎",
-        "color":  "#5C1A3A",
-    },
-}
-
-# ─────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────
-st.markdown(f"""
-<div style="background:linear-gradient(135deg,#1B3A6B,#2E6DB4);
-            padding:28px 32px; border-radius:12px; margin-bottom:24px;">
-  <h1 style="color:white;margin:0;font-size:2.2rem;">✈ {t("app_title")}</h1>
-  <p style="color:#CBD5E1;margin:6px 0 0 0;font-size:1rem;">
-      {t("app_subtitle")}
-  </p>
+# ------------------- HEADER -------------------
+st.markdown("""
+<div class="top-header">
+    <div class="logo">
+        AEROLÍNEAS<br><small>RAFAEL PABÓN</small>
+    </div>
+    <div class="nav-links">
+        <a href="#">Book a flight</a>
+        <a href="#">Stopover / Packages</a>
+        <a href="#">Manage / Check in</a>
+        <a href="#">Flight status</a>
+    </div>
+    <div class="user-area">
+        <span>🌐 EN</span>
+        <span class="login-btn">Log in | Sign up</span>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────
-# SELECTOR DE NODO / REGIÓN
-# ─────────────────────────────────────────
-st.subheader(t("select_region"))
-st.caption(t("region_caption"))
+# ------------------- HERO BANNER -------------------
+st.markdown('<div class="hero-banner"></div>', unsafe_allow_html=True)
 
-opcion = st.radio(
-    label     = t("select_region"),
-    options   = list(NODOS.keys()),
-    index     = st.session_state.get("nodo_opcion_idx", 0),
-    horizontal = True,
-    label_visibility = "collapsed",
-)
+# ------------------- TARJETA DE BÚSQUEDA -------------------
+# Abrimos el card
+st.markdown('<div class="search-card">', unsafe_allow_html=True)
 
-nodo = NODOS[opcion]
+# Estado para la pestaña activa
+if 'active_tab' not in st.session_state:
+    st.session_state.active_tab = "Return"
 
-# Persistir en session_state
-st.session_state.node_url  = nodo["url"]
-st.session_state.node_id   = nodo["id"]
-st.session_state.nodo_opcion_idx = list(NODOS.keys()).index(opcion)
+# Pestañas
+col_t1, col_t2, col_t3 = st.columns([1, 1, 1])
 
-# ─────────────────────────────────────────
-# INFO + VERIFICAR CONEXIÓN
-# ─────────────────────────────────────────
-col_info, col_clock = st.columns([2, 1])
+with col_t1:
+    if st.button("✈️ Return", key="tab_return", use_container_width=True):
+        st.session_state.active_tab = "Return"
+        st.rerun()
+    if st.session_state.active_tab == "Return":
+        st.markdown('<div style="height:3px; background:#6B0F1E; margin-top:-10px; border-radius:3px;"></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="height:3px; margin-top:-10px;"></div>', unsafe_allow_html=True)
 
-with col_info:
-    st.markdown(
-        f"**{t('node')}:** {nodo['id']}  |  "
-        f"**{t('engine')}:** {nodo['engine']}  |  "
-        f"**{t('url')}:** `{nodo['url']}`  |  "
-        f"**{t('region_caption').split('.')[0]}:** {nodo['region']}"
-    )
+with col_t2:
+    if st.button("🔄 One way", key="tab_oneway", use_container_width=True):
+        st.session_state.active_tab = "One way"
+        st.rerun()
 
-with col_clock:
-    if st.button(t("check_connection"), use_container_width=True):
-        try:
-            resp = httpx.get(f"{nodo['url']}/sync/status", timeout=5)
-            data = resp.json()
-            st.success(f"{t('connected')} — {t('clock')}: {data['reloj_vectorial']}")
-            if data["timers_activos"] > 0:
-                st.info(f"{data['timers_activos']} {t('seats_in_refund')}")
-        except Exception as e:
-            st.error(f"{t('no_connection')}: {e}")
+with col_t3:
+    if st.button("📍 Multi-city", key="tab_multicity", use_container_width=True):
+        st.session_state.active_tab = "Multi-city"
+        st.rerun()
 
-st.divider()
+st.markdown("<br>", unsafe_allow_html=True)
 
-# ─────────────────────────────────────────
-# ESTADO DE TODOS LOS NODOS
-# ─────────────────────────────────────────
-st.subheader(t("system_status"))
+# Grid de búsqueda - 5 columnas
+col1, col2, col3, col4, col5 = st.columns(5)
+
+with col1:
+    st.markdown('<div class="field-label">FROM</div>', unsafe_allow_html=True)
+    from_airport = st.text_input("", placeholder="City or airport", label_visibility="collapsed", key="from_input")
+
+with col2:
+    st.markdown('<div class="field-label">TO</div>', unsafe_allow_html=True)
+    to_airport = st.text_input("", placeholder="City or airport", label_visibility="collapsed", key="to_input")
+
+with col3:
+    st.markdown('<div class="field-label">DEPARTURE</div>', unsafe_allow_html=True)
+    depart_date = st.date_input("", datetime.now() + timedelta(days=30), label_visibility="collapsed", key="depart_date")
+
+with col4:
+    if st.session_state.active_tab == "Return":
+        st.markdown('<div class="field-label">RETURN</div>', unsafe_allow_html=True)
+        return_date = st.date_input("", datetime.now() + timedelta(days=37), label_visibility="collapsed", key="return_date")
+    else:
+        return_date = None
+        st.markdown('<div class="field-label">&nbsp;</div>', unsafe_allow_html=True)
+        st.empty()
+
+with col5:
+    st.markdown('<div class="field-label">PASSENGERS/CLASS</div>', unsafe_allow_html=True)
+    passengers = st.selectbox("", ["1 Passenger", "2 Passengers", "3 Passengers", "4 Passengers"], label_visibility="collapsed", key="passengers")
+    class_type = st.selectbox("", ["Economy", "Business", "First"], label_visibility="collapsed", key="class_type")
+
+# Opciones adicionales
+col_check, col_promo, col_btn = st.columns([1.2, 2, 1.2])
+
+with col_check:
+    use_avios = st.checkbox("Book using Avios")
+
+with col_promo:
+    promo = st.text_input("", placeholder="+ Add promo code", label_visibility="collapsed")
+
+with col_btn:
+    if st.button("🔍 Search flights", key="search_btn", use_container_width=True):
+        if from_airport and to_airport:
+            st.session_state.search_params = {
+                "origin": from_airport.upper(),
+                "destination": to_airport.upper(),
+                "departure": depart_date.strftime("%Y-%m-%d"),
+                "return": return_date.strftime("%Y-%m-%d") if return_date else None,
+                "passengers": passengers,
+                "class": class_type
+            }
+            st.switch_page("pages/1_buscar_vuelo.py")
+        else:
+            st.warning("Please enter origin and destination")
+
+# Cerramos el card
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ------------------- SECCIÓN DE DESTINOS -------------------
+st.markdown('<div class="section-title">🌍 Places we think you\'ll love</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-subtitle">From selected departure cities</div>', unsafe_allow_html=True)
+
+destinos = [
+    {"ciudad": "Paris", "codigo": "CDG", "fecha_ida": "27 May 2026", "fecha_vuelta": "02 Jun 2026", "precio": "USD 365", "img": "https://images.unsplash.com/photo-1502602898652-3b9b2934c6e3?w=400&h=180&fit=crop"},
+    {"ciudad": "London", "codigo": "LHR", "fecha_ida": "15 Jun 2026", "fecha_vuelta": "20 Jun 2026", "precio": "USD 420", "img": "https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?w=400&h=180&fit=crop"},
+    {"ciudad": "Tokyo", "codigo": "TYO", "fecha_ida": "10 Jul 2026", "fecha_vuelta": "25 Jul 2026", "precio": "USD 890", "img": "https://images.unsplash.com/photo-1536098561742-ca998e48cbcc?w=400&h=180&fit=crop"},
+    {"ciudad": "New York", "codigo": "NYC", "fecha_ida": "05 Aug 2026", "fecha_vuelta": "12 Aug 2026", "precio": "USD 550", "img": "https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=400&h=180&fit=crop"},
+    {"ciudad": "Dubai", "codigo": "DXB", "fecha_ida": "20 Sep 2026", "fecha_vuelta": "28 Sep 2026", "precio": "USD 680", "img": "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?w=400&h=180&fit=crop"},
+    {"ciudad": "Sydney", "codigo": "SYD", "fecha_ida": "04 Jun 2026", "fecha_vuelta": "04 Jul 2026", "precio": "USD 890", "img": "https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=400&h=180&fit=crop"},
+]
 
 cols = st.columns(3)
-for i, (label, info) in enumerate(NODOS.items()):
-    with cols[i]:
-        # Tarjeta con borde de color por región
+for idx, destino in enumerate(destinos):
+    with cols[idx % 3]:
+        st.markdown(f"""
+        <div class="destino-card">
+            <div class="destino-img" style="background-image: url('{destino['img']}');"></div>
+            <div class="destino-info">
+                <div class="destino-ciudad">{destino['ciudad']} ({destino['codigo']})</div>
+                <div class="destino-fechas">{destino['fecha_ida']} - {destino['fecha_vuelta']}</div>
+                <div class="destino-precio">{destino['precio']}</div>
+                <div class="destino-clase">Economy</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ------------------- FOOTER -------------------
+st.markdown("""
+<div class="footer">
+    <div class="footer-links">
+        <a href="#">Download app</a>
+        <a href="#">Follow us on X</a>
+        <a href="#">Instagram</a>
+        <a href="#">Facebook</a>
+        <a href="#">Help Center</a>
+    </div>
+    <p>✈️ Aerolíneas Rafael Pabón | Sistema distribuido de reservas · 3 nodos · Relojes Vectoriales</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ------------------- SIDEBAR -------------------
+with st.sidebar:
+    st.markdown("### 🌍 Select your region")
+    
+    if os.path.exists('/.dockerenv'):
+        node_urls = {
+            "Europe (Frankfurt)": "http://nodo1:8001",
+            "Asia (Tokyo)": "http://nodo2:8002",
+            "South America (La Paz)": "http://nodo3:8003"
+        }
+    else:
+        node_urls = {
+            "Europe (Frankfurt)": "http://localhost:8001",
+            "Asia (Tokyo)": "http://localhost:8002",
+            "South America (La Paz)": "http://localhost:8003"
+        }
+    
+    selected_region = st.radio("Connection region:", list(node_urls.keys()), index=0)
+    
+    st.session_state.node_url = node_urls[selected_region]
+    st.session_state.node_id = selected_region[:10]
+    
+    st.markdown("---")
+    st.markdown("### ℹ️ System Status")
+    
+    for region, url in node_urls.items():
         try:
-            resp = httpx.get(f"{info['url']}/", timeout=3)
-            data = resp.json()
-            st.markdown(f"""
-<div style="border:2px solid {info['color']};border-radius:8px;padding:12px;
-            background:#f8fafc;">
-  <b style="color:{info['color']}">{info['icon']} {t('node')} {info['id']} — {info['region']}</b><br>
-  <span style="color:#16a34a;font-size:0.9rem;">● {t('online')}</span><br>
-  <small>{t('engine')}: {info['engine']}</small>
-</div>
-""", unsafe_allow_html=True)
-        except Exception:
-            st.markdown(f"""
-<div style="border:2px solid #ef4444;border-radius:8px;padding:12px;
-            background:#fef2f2;">
-  <b style="color:#991b1b">{info['icon']} {t('node')} {info['id']} — {info['region']}</b><br>
-  <span style="color:#dc2626;font-size:0.9rem;">● {t('offline')}</span><br>
-  <small>{t('engine')}: {info['engine']}</small>
-</div>
-""", unsafe_allow_html=True)
-
-st.divider()
-
-# ─────────────────────────────────────────
-# NAVEGACIÓN
-# ─────────────────────────────────────────
-st.subheader(t("what_to_do"))
-c1, c2, c3, c4, c5 = st.columns(5)
-
-with c1:
-    st.page_link("pages/1_buscar_vuelo.py", label=t("search_flight"), icon="🔍")
-    st.caption(t("search_caption"))
-
-with c2:
-    if st.session_state.get("vuelo"):
-        vuelo = st.session_state.vuelo
-        st.page_link("pages/2_mapa_asientos.py", label=t("seat_map"), icon="💺")
-        st.caption(f"**{vuelo['vuelo_id']}** {vuelo['origen']}→{vuelo['destino']}")
-    else:
-        st.markdown(f"💺 **{t('seat_map')}**")
-        st.caption(t("seat_map_caption"))
-
-with c3:
-    if st.session_state.get("boarding_pass"):
-        st.page_link("pages/3_boarding_pass.py", label=t("boarding_pass"), icon="🎫")
-        st.caption(t("boarding_caption"))
-    else:
-        st.markdown(f"🎫 **{t('boarding_pass')}**")
-        st.caption(t("boarding_caption"))
-
-with c4:
-    st.page_link("pages/4_dashboard_vuelo.py", label=t("dashboard_flight"), icon="📊")
-    st.caption(t("occupancy") + " / " + t("revenue"))
-
-with c5:
-    st.page_link("pages/5_dashboard_global.py", label=t("dashboard_global"), icon="🌐")
-    st.caption(t("total_flights") + " · " + t("total_seats"))
-
-# ─────────────────────────────────────────
-# PIE DE PÁGINA
-# ─────────────────────────────────────────
-st.markdown("---")
-st.caption(t("footer"))
+            response = requests.get(f"{url}/flights", timeout=2)
+            if response.status_code == 200:
+                st.success(f"✅ {region}")
+            else:
+                st.warning(f"⚠️ {region}")
+        except:
+            st.error(f"❌ {region}")
